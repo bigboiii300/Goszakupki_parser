@@ -361,18 +361,19 @@ def parse_docs_from_dir(url):
     check_dirs = check_dirs_in_content()
     while check_dirs:
         check_dirs = check_dirs_in_content()
-    w = wc.Dispatch('Word.Application')
-    paths = []
-    folder = os.getcwd()
-    for root, dirs, files in os.walk(folder):
-        for file in files:
-            if file.endswith('doc') and not file.startswith('~'):
-                paths.append(os.path.join(root, file))
-    for path in paths:
-        doc = w.Documents.Open(path)
-        doc.SaveAs(path + "x", 16)
-        doc.Close()
-    w.Quit()
+    # fix fix fix       doc to docx
+    # paths = []
+    # folder = os.getcwd()
+    # for root, dirs, files in os.walk(folder):
+    #     for file in files:
+    #         if file.endswith('doc') and not file.startswith('~'):
+    #             paths.append(os.path.join(root, file))
+    # for path in paths:
+    #     w = wc.Dispatch('Word.Application')
+    #     doc = w.Documents.Open(path)
+    #     doc.SaveAs(path + "x", 16)
+    #     doc.Close()
+    # w.Quit()
     parse_docs(url)
     shutil.rmtree('content')
 
