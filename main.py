@@ -4,17 +4,19 @@ import re
 import shutil
 from urllib.request import urlopen, Request
 import requests
-import aspose.words as aw
 from bs4 import BeautifulSoup
 from docx import Document
+from pdf2docx import Converter
 from py7zr import unpack_7zarchive
 from pyunpack import Archive
 import pandas as pd
 from win32com import client as wc
-
+ 
+# pip install pdf2docx
+ 
 hdr = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
                      'Chrome/55.0.2883.87 Safari/537.36'}
-
+ 
 keywords_samples = ['товарные образцы',
                     'экземпляр СИЗ',
                     'экземпляр продукции',
@@ -43,7 +45,7 @@ keywords_samples = ['товарные образцы',
                     'направить образец',
                     'направить образцы',
                     'направленные образцы']
-
+ 
 keywords_analogs = ['аналог',
                     'аналоги',
                     'аналогичной',
@@ -54,7 +56,7 @@ keywords_analogs = ['аналог',
                     'эквивалента',
                     'эквиваленты',
                     'аналогичный']
-
+ 
 keywords_delivery_time = ['срок поставки',
                           'сроки поставки',
                           'сроки поставок',
@@ -83,7 +85,7 @@ keywords_delivery_time = ['срок поставки',
                           'поставка партии',
                           'поставки партии',
                           'сроки (периоды)']
-
+ 
 keywords_payment_time = [
     'срок оплаты',
     'сроки оплаты',
@@ -115,14 +117,14 @@ keywords_payment_time = [
     'расчет по договору',
     'производит расчет'
 ]
-
+ 
 keywords_divisibility = ['количество лотов',
                          'попозиционная поставка',
                          '2х и более победителей',
                          'нескольких победителей',
                          'выбор более одного победителя',
                          'несколько поставщиков']
-
+ 
 keywords_address = ['адрес поставки',
                     'адреса поставки',
                     'адреса поставок',
@@ -140,7 +142,7 @@ keywords_address = ['адрес поставки',
                     'адреса доставок',
                     'адреса доставки',
                     'адрес']
-
+ 
 keywords_support = ['обеспечение договора',
                     'обеспечение заявки',
                     'обеспечение исполнения',
@@ -148,7 +150,7 @@ keywords_support = ['обеспечение договора',
                     'размер обеспечения',
                     'банковское сопровождение',
                     'обеспечение обязательств']
-
+ 
 procedure_number = []
 customer = []
 method_of_conducting = []
@@ -179,8 +181,8 @@ data_dict = {'Номер процедуры': procedure_number,
              'Адрес': data_address,
              'Обеспечение': data_support,
              'Ссылка': data_url}
-
-
+ 
+ 
 def main():
     start_time = datetime.now()
     file1 = open("urls.txt", "r")
@@ -190,25 +192,28 @@ def main():
         # прерываем цикл, если строка пустая
         if not line:
             break
-
+ 
         if os.path.isdir("content"):
             shutil.rmtree('content')
             os.mkdir("content")
         else:
             os.mkdir("content")
+        print(line)
         if 'zakupki.gov.ru/epz/order/notice' in line:
             parse_epz_order(line)
-        if 'zakupki.gov.ru/223/purchase/public' in line:
+        elif 'zakupki.gov.ru/223/purchase/public' in line:
             parse_223_order(line)
-        if 'zakupki.gov.ru/epz/pricereq/card' in line:
+        elif 'zakupki.gov.ru/epz/pricereq/card' in line:
             parse_order_card(line)
-
+        else:
+            write_error_to_file(line.strip())
+ 
     # закрываем файл
     file1.close()
     write_dataframe_to_excel(data_dict)
     print(datetime.now() - start_time)
-
-
+ 
+ 
 def parse_order_card(line):
     while True:
         try:
@@ -234,13 +239,13 @@ def parse_order_card(line):
                 spans = div.findAll('span')
                 if spans[0].text.strip() == 'Размещено':
                     date_str += spans[1].text.strip()
-
+ 
             divs = soup.findAll('div', {'class': "cardMainInfo__section col-12"})
             for div in divs:
                 spans = div.findAll('span')
                 if spans[0].text.strip() == 'Сроки проведения закупки':
                     end_date_str += spans[0].text.strip() + ': ' + spans[1].text.strip()
-
+ 
             divs = soup.findAll('div', {'class': 'cardMainInfo__section'})
             for div in divs:
                 spans = div.findAll('span')
@@ -264,7 +269,7 @@ def parse_order_card(line):
                     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36'
                 }
             )
-
+ 
             f = urlopen(req)
             html_page = f.read().decode('utf-8')
             soup = BeautifulSoup(html_page, features="lxml")
@@ -273,7 +278,6 @@ def parse_order_card(line):
                 filename = link.text.strip()
                 url_download = link.get('href')
                 print(filename)
-                print(url_download)
                 while True:
                     try:
                         file_object = requests.get(url_download, headers=hdr)
@@ -290,8 +294,8 @@ def parse_order_card(line):
             print(e)
             pass
     parse_docs_from_dir(url_epz)
-
-
+ 
+ 
 def parse_223_order(line):
     doc_url, r, r_docs, url = parse_url(line.strip())
     tries = 0
@@ -310,16 +314,17 @@ def parse_223_order(line):
             pass
     if need_to_parse:
         parse_docs_from_dir(url)
-
-
+ 
+ 
 def parse_epz_order(line):
-    parse_url_epz(line)
-    url_epz = line.replace('common-info.html', 'documents.html')
-    print(url_epz)
-    download_docs_epz(url_epz)
-    parse_docs_from_dir(url_epz)
-
-
+    ex = parse_url_epz(line)
+    if ex:
+        url_epz = line.replace('common-info.html', 'documents.html')
+        print(url_epz)
+        download_docs_epz(url_epz)
+        parse_docs_from_dir(url_epz)
+ 
+ 
 def download_docs_epz(url_epz):
     while True:
         try:
@@ -330,7 +335,7 @@ def download_docs_epz(url_epz):
                     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.47 Safari/537.36'
                 }
             )
-
+ 
             f = urlopen(req)
             html_page = f.read().decode('utf-8')
             soup = BeautifulSoup(html_page, features="lxml")
@@ -339,7 +344,6 @@ def download_docs_epz(url_epz):
                 filename = link.text.strip()
                 url_download = link.get('href')
                 print(filename)
-                print(url_download)
                 while True:
                     try:
                         file_object = requests.get(url_download, headers=hdr)
@@ -353,31 +357,52 @@ def download_docs_epz(url_epz):
                         pass
             break
         except Exception as e:
-            print(e)
+            if e.args[0] == 'list index out of range':
+                break
             pass
-
-
+ 
+ 
 def parse_docs_from_dir(url):
     check_dirs = check_dirs_in_content()
     while check_dirs:
         check_dirs = check_dirs_in_content()
     # fix fix fix       doc to docx
-    # paths = []
-    # folder = os.getcwd()
-    # for root, dirs, files in os.walk(folder):
-    #     for file in files:
-    #         if file.endswith('doc') and not file.startswith('~'):
-    #             paths.append(os.path.join(root, file))
-    # for path in paths:
-    #     w = wc.Dispatch('Word.Application')
-    #     doc = w.Documents.Open(path)
-    #     doc.SaveAs(path + "x", 16)
-    #     doc.Close()
-    # w.Quit()
+    word = wc.Dispatch('Word.Application.8')
+    folder = os.getcwd() + '\\content'
+    for dir_path, dirs, files in os.walk(folder):
+        for file_name in files:
+            try:
+                file_path = os.path.join(dir_path, file_name)
+                file_name, file_extension = os.path.splitext(file_path)
+ 
+                if "~$" not in file_name:
+                    if file_extension.lower() == '.doc':  #
+                        docx_file = '{0}{1}'.format(file_path, 'x')
+ 
+                        if not os.path.isfile(docx_file):  # Skip conversion where docx file already exists
+ 
+                            file_path = os.path.abspath(file_path)
+                            docx_file = os.path.abspath(docx_file)
+                            try:
+                                word_doc = word.Documents.Open(file_path)
+                                word_doc.SaveAs2(docx_file, FileFormat=16)
+                                word_doc.Close()
+                            except Exception as e:
+                                print('Failed to Convert: {0}'.format(file_path))
+                    if file_extension.lower() == '.pdf':
+                        try:
+                            cv = Converter(file_name + '.pdf')
+                            cv.convert(file_name + '.docx', start=0, end=None)
+                            cv.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    word.Quit()
     parse_docs(url)
     shutil.rmtree('content')
-
-
+ 
+ 
 def parse_url_epz(line):
     while True:
         try:
@@ -398,6 +423,9 @@ def parse_url_epz(line):
             procedure_str += number.text.strip()
             print(procedure_str)
             divs = soup.findAll('div', {"class": "cardMainInfo__section"})
+            if len(divs) == 0:
+                write_error_to_file(line.strip())
+                return False
             for div in divs:
                 spans = div.findAll('span')
                 if spans[0].text.strip() == 'Заказчик' or spans[
@@ -419,27 +447,30 @@ def parse_url_epz(line):
             method_str += 'нет'
             add_parse_str_to_list(customer_str, date_str, end_date_str, method_str, nmc_str, platform_str,
                                   procedure_str)
-            break
-        except Exception:
+            return True
+        except IndexError:
+            write_error_to_file(line.strip())
+            return False
+        except Exception as e:
             pass
-
-
+ 
+ 
 def write_error_to_file(url):
     my_file = open("logs.txt", "a+")
-    logs = f'{url}\t is not correct\n'
+    logs = f'{url}\t is not correct\t' + str(datetime.now()) + '\n'
     my_file.write(logs)
     my_file.close()
-
-
+ 
+ 
 def write_dataframe_to_excel(data_to_excel):
     df = pd.DataFrame(data_to_excel)
     if os.path.isfile('data.xlsx'):
         old_df = pd.read_excel('data.xlsx', index_col=0)
         df = old_df.append(df, ignore_index=True)
-
+ 
     df.to_excel("data.xlsx")
-
-
+ 
+ 
 def parse_docs(url):
     str_samples = ''
     str_analogs = ''
@@ -448,7 +479,7 @@ def parse_docs(url):
     str_divisibility = ''
     str_address = ''
     str_support = ''
-
+ 
     for filename in os.listdir("content"):
         print(filename)
         split_tup = os.path.splitext(filename)
@@ -459,21 +490,68 @@ def parse_docs(url):
                                      str_payment_time, str_samples, str_support)
         except Exception:
             pass
-
+ 
     add_data_to_list(str_address, str_analogs, str_delivery_time, str_divisibility, str_payment_time, str_samples,
                      str_support, url)
-
-
+ 
+ 
+# def convert_pdf2docx(input_file: str, output_file: str):
+#     """Преобразует PDF в DOCX"""
+#     result = parse(pdf_file=input_file,
+#                    docx_with_path=output_file)
+#     return result
+ 
+ 
 def get_info_from_docx(extension, filename, str_address, str_analogs, str_delivery_time, str_divisibility,
                        str_payment_time, str_samples, str_support):
-    if '.pdf' == extension:
-        doc = aw.Document(f'content/{filename}')
-        print(filename + '\n\n')
-        split_tup = os.path.splitext(filename)
-        extension = '.docx'
-        filename = split_tup[0] + extension
-        print(filename)
-        doc.save(f'content/{filename}')
+    # if '.pdf' == extension:
+    #     pdfFile = wi(filename=f'content/{filename}', resolution=300)
+    #     image = pdfFile.convert('jpeg')
+    #
+    #     imageBlobs = []
+    #
+    #     for img in image.sequence:
+    #         imgPage = wi(image=img)
+    #         imageBlobs.append(imgPage.make_blob('jpeg'))
+    #
+    #     extract = []
+    #
+    #     for imgBlob in imageBlobs:
+    #         image = Image.open(io.BytesIO(imgBlob))
+    #         text = pytesseract.image_to_string(image, lang='eng')
+    #         extract.append(text)
+    #
+    #     print(extract)
+    # pdf = open(f'content/{filename}', 'rb')
+    # pdf_reader = PyPDF2.PdfFileReader(pdf)
+    # total_pages = pdf_reader.getNumPages()
+    # text = ''
+    # for i in range(total_pages):
+    #     page = pdf_reader.getPage(0)
+    #     text += page.extractText()
+ 
+    # with pdfplumber.open(f'content/{filename}') as pdf:
+    # total_pages = len(pdf.pages)
+    # text = ''
+    # for i in range(total_pages):
+    #     page_obj = pdf.pages[i]
+    #     text += page_obj.extract_text()
+ 
+    # raw = parser.from_file(f'content/{filename}')
+    # print(raw['content'])
+ 
+    # split_tup = os.path.splitext(filename)
+    # extension = '.docx'
+    # new_filename = split_tup[0] + extension
+    # convert_pdf2docx(f'content/{filename}', f'content/{new_filename}')
+ 
+    # doc = aw.Document(f'content/{filename}')
+    # print(filename + '\n\n')
+    # split_tup = os.path.splitext(filename)
+    # extension = '.docx'
+    # filename = split_tup[0] + extension
+    # print(filename)
+    # doc.save(f'content/{filename}')
     if '.docx' == extension:
         try:
             doc = Document(f'content/{filename}')
@@ -544,7 +622,7 @@ def get_info_from_docx(extension, filename, str_address, str_analogs, str_delive
                             str_divisibility = check_length_text(cell, key_word, row, str_divisibility, filename)
                         for key_word in keywords_support:
                             str_support = check_length_text(cell, key_word, row, str_support, filename)
-
+ 
                 # Data will be a list of rows represented as dictionaries
                 # containing each row's data.
                 keys = None
@@ -576,8 +654,8 @@ def get_info_from_docx(extension, filename, str_address, str_analogs, str_delive
             except Exception as e:
                 print(e)
     return str_address, str_analogs, str_delivery_time, str_divisibility, str_payment_time, str_samples, str_support
-
-
+ 
+ 
 def get_vertical_info_from_table(data, row_data, str_param, keywords, filename):
     for key_word in keywords:
         if key_word in data:
@@ -586,8 +664,8 @@ def get_vertical_info_from_table(data, row_data, str_param, keywords, filename):
                     str_param += filename.strip() + ':\n'
                 str_param += data + ': ' + row_data[data] + '\n'
     return str_param
-
-
+ 
+ 
 def check_length_text(cell, key_word, row, str_param, filename):
     temp = ''
     if key_word in cell.text.lower():
@@ -599,8 +677,8 @@ def check_length_text(cell, key_word, row, str_param, filename):
                 str_param += filename.strip() + ':\n'
             str_param += '\n' + temp + '\n'
     return str_param
-
-
+ 
+ 
 def check_content_in_headers(run_bold_text):
     res = []
     # образцы
@@ -649,8 +727,8 @@ def check_content_in_headers(run_bold_text):
         res.append(False)
         res.append('none')
     return res
-
-
+ 
+ 
 def find_keywords(para, str_address, str_analogs, str_delivery_time, str_divisibility, str_payment_time, str_samples,
                   str_support, filename):
     try:
@@ -672,8 +750,8 @@ def find_keywords(para, str_address, str_analogs, str_delivery_time, str_divisib
     except Exception as e:
         print(e)
     return str_address, str_analogs, str_delivery_time, str_divisibility, str_payment_time, str_samples, str_support
-
-
+ 
+ 
 def get_paragraphs(para, param_str, keywords_list, filename):
     for key_word in keywords_list:
         if key_word in para.text.lower():
@@ -682,42 +760,49 @@ def get_paragraphs(para, param_str, keywords_list, filename):
             if para.text + '\n' not in param_str:
                 param_str += para.text + '\n'
     return param_str
-
-
+ 
+ 
 def add_data_to_list(str_address, str_analogs, str_delivery_time, str_divisibility, str_payment_time, str_samples,
                      str_support, url):
     if str_samples == '':
         data_samples.append('нет')
     else:
+        str_samples = re.sub('[\n]+', '\n', str_samples)
         data_samples.append(str_samples)
     if str_analogs == '':
         data_analogs.append('нет')
     else:
+        str_analogs = re.sub('[\n]+', '\n', str_analogs)
         data_analogs.append(str_analogs)
     if str_delivery_time == '':
         data_delivery_time.append('нет')
     else:
+        str_delivery_time = re.sub('[\n]+', '\n', str_delivery_time)
         data_delivery_time.append(str_delivery_time)
     if str_payment_time == '':
         data_payment_time.append('нет')
     else:
+        str_payment_time = re.sub('[\n]+', '\n', str_payment_time)
         data_payment_time.append(str_payment_time)
     if str_address == '':
         data_address.append('нет')
     else:
+        str_address = re.sub('[\n]+', '\n', str_address)
         data_address.append(str_address)
     if str_divisibility == '':
         data_divisibility.append('нет')
     else:
+        str_divisibility = re.sub('[\n]+', '\n', str_divisibility)
         data_divisibility.append(str_divisibility)
     if str_support == '':
         data_support.append('нет')
     else:
+        str_support = re.sub('[\n]+', '\n', str_support)
         data_support.append(str_support)
-
+ 
     data_url.append(url)
-
-
+ 
+ 
 def check_dirs_in_content():
     check_dirs = False
     list_dir = os.listdir("content")
@@ -734,8 +819,8 @@ def check_dirs_in_content():
             extract_files_from_archive(dir_temp)
             check_dirs = True
     return check_dirs
-
-
+ 
+ 
 def download_docs(soup, url):
     need_to_parse = True
     allowed_downloads, count_downloads = check_validity_docs(soup)
@@ -761,8 +846,8 @@ def download_docs(soup, url):
         if count_downloads >= allowed_downloads:
             break
     return need_to_parse
-
-
+ 
+ 
 def check_file_extension(file_object, filename):
     content_type = file_object.headers['Content-Disposition']
     filename_redirect = re.findall("filename=(.+)", content_type)[0]
@@ -771,8 +856,8 @@ def check_file_extension(file_object, filename):
     if extension not in filename:
         filename += extension
     return filename
-
-
+ 
+ 
 def check_validity_docs(soup):
     count_downloads = 0
     allowed_downloads = 0
@@ -781,8 +866,8 @@ def check_validity_docs(soup):
             break
         allowed_downloads += 1
     return allowed_downloads, count_downloads
-
-
+ 
+ 
 def extract_files_from_archive(filename):
     try:
         if ".rar" in filename or ".zip" in filename:
@@ -794,8 +879,8 @@ def extract_files_from_archive(filename):
             os.remove(f'content/{filename}')
     except Exception:
         os.remove(f'content/{filename}')
-
-
+ 
+ 
 def get_html_page(doc_url):
     count_connections = 0
     while True:
@@ -807,8 +892,8 @@ def get_html_page(doc_url):
             return html_page
         except Exception:
             pass
-
-
+ 
+ 
 def parse_url(curr_url):
     while True:
         try:
@@ -819,7 +904,7 @@ def parse_url(curr_url):
             end_date_str = ''
             platform_str = ''
             nmc_str = ''
-
+ 
             url = curr_url
             r = requests.get(url, headers=hdr)
             html_page = urlopen(url)
@@ -844,7 +929,7 @@ def parse_url(curr_url):
                         end_date_str += res_text[2] + '\n'
                     if 'Адрес электронной площадки' in res_text[0]:
                         platform_str += res_text[1] + '\n'
-
+ 
                 if row.find('td'):
                     list_text = row.text.strip().split('\n')
                     res_text = []
@@ -873,13 +958,13 @@ def parse_url(curr_url):
             break
         except Exception:
             pass
-
+ 
     add_parse_str_to_list(customer_str, date_str, end_date_str, method_str, nmc_str, platform_str, procedure_str)
     doc_url = url.replace("common-info.html", "documents.html")
     r_docs = requests.get(doc_url, headers=hdr)
     return doc_url, r, r_docs, url
-
-
+ 
+ 
 def add_parse_str_to_list(customer_str, date_str, end_date_str, method_str, nmc_str, platform_str, procedure_str):
     if not procedure_str:
         procedure_number.append('нет')
@@ -909,8 +994,9 @@ def add_parse_str_to_list(customer_str, date_str, end_date_str, method_str, nmc_
         nmc.append('нет')
     else:
         nmc.append(nmc_str)
-
-
+ 
+ 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     main()
+ 
